@@ -1,0 +1,8 @@
+server:
+  http_listen_port: 9498
+scrape_configs:
+- job_name: instances
+  static_configs:
+  - targets:
+    - mas.to
+    - mastodon.social
