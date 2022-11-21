@@ -7,6 +7,7 @@ extern crate serde_yaml;
 
 use std::{fs, path::Path};
 
+use chrono::NaiveDate;
 use prometheus::{Encoder, IntGaugeVec, Opts, Registry, TextEncoder};
 use serde_derive::{Deserialize, Serialize};
 use serde_json::Value;
@@ -63,10 +64,47 @@ lazy_static! {
         &["instance"],
     )
     .unwrap();
+
+    // Account followers count
+    static ref MASTODON_ACCOUNT_FOLLOWERS_COUNT: IntGaugeVec = IntGaugeVec::new(
+        Opts::new(
+            "mastodon_account_followers_count",
+            "Number of followers for account.",
+        ),
+        &["instance", "account_id", "username"],
+    ).unwrap();
+
+    // Account following count
+    static ref MASTODON_ACCOUNT_FOLLOWING_COUNT: IntGaugeVec = IntGaugeVec::new(
+        Opts::new(
+            "mastodon_account_following_count",
+            "Number of accounts followed by account.",
+        ),
+        &["instance", "account_id", "username"],
+    ).unwrap();
+
+    // Account statuses count
+    static ref MASTODON_ACCOUNT_STATUSES_COUNT: IntGaugeVec = IntGaugeVec::new(
+        Opts::new(
+            "mastodon_account_statuses_count",
+            "Number of statuses for account.",
+        ),
+        &["instance", "account_id", "username"],
+    ).unwrap();
+
+    // Account last status at
+    static ref MASTODON_ACCOUNT_LAST_STATUS_AT: IntGaugeVec = IntGaugeVec::new(
+        Opts::new(
+            "mastodon_account_last_status_at",
+            "Number of seconds since 1970 of last status for account.",
+        ),
+        &["instance", "account_id", "username"],
+    ).unwrap();
 }
 
 lazy_mut! {
     static mut INSTANCES: Vec<String> = Vec::new();
+    static mut ACCOUNTS: Vec<(String, String)> = Vec::new();
 }
 
 async fn collect_instance(instance: &str) -> Result<(), reqwest::Error> {
@@ -152,7 +190,120 @@ async fn collect_instances() -> Result<(), tokio::task::JoinError> {
             .collect::<Vec<_>>();
 
         for task in tasks {
-            task.await?.unwrap();
+            task.await?.ok();
+        }
+    }
+
+    Ok(())
+}
+
+async fn collect_account(instance: &str, account_id: &str) -> Result<(), reqwest::Error> {
+    let url = format!("https://{}/api/v1/accounts/{}", instance, account_id);
+
+    println!("Collecting account {}@{}", account_id, instance);
+
+    let response = reqwest::get(url).await?;
+
+    // Collect x-ratelimit-remaining from header
+    let ratelimit_remaining: i64 = response
+        .headers()
+        .get("x-ratelimit-remaining")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    println!("{}: Ratelimit remaining: {}", instance, ratelimit_remaining);
+    MASTODON_RATELIMIT_REMAINING
+        .with_label_values(&[instance])
+        .set(ratelimit_remaining);
+
+    // Collect x-ratelimit-reset from header
+    let ratelimit_reset = response
+        .headers()
+        .get("x-ratelimit-reset")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .parse::<chrono::DateTime<chrono::Utc>>()
+        .unwrap()
+        .timestamp();
+    println!("{}: Ratelimit reset: {}", instance, ratelimit_reset);
+    MASTODON_RATELIMIT_RESET
+        .with_label_values(&[instance])
+        .set(ratelimit_reset);
+
+    // Collect response body data
+    let body = response.json::<Value>().await?;
+
+    // TODO @Shinigami92 2022-11-21: Handle case when account is not found
+    let username = body["username"].as_str().unwrap();
+
+    // Collect account info
+    let info_labels = [instance, account_id, username];
+    println!("Account info: {:?}", info_labels);
+
+    // Collect account followers count
+    let followers_count: i64 = body["followers_count"].as_i64().unwrap();
+    println!(
+        "@{}@{}: Followers count: {}",
+        username, instance, followers_count
+    );
+    MASTODON_ACCOUNT_FOLLOWERS_COUNT
+        .with_label_values(&info_labels)
+        .set(followers_count);
+
+    // Collect account following count
+    let following_count: i64 = body["following_count"].as_i64().unwrap();
+    println!(
+        "@{}@{}: Following count: {}",
+        username, instance, following_count
+    );
+    MASTODON_ACCOUNT_FOLLOWING_COUNT
+        .with_label_values(&info_labels)
+        .set(following_count);
+
+    // Collect account statuses count
+    let statuses_count: i64 = body["statuses_count"].as_i64().unwrap();
+    println!(
+        "@{}@{}: Statuses count: {}",
+        username, instance, statuses_count
+    );
+    MASTODON_ACCOUNT_STATUSES_COUNT
+        .with_label_values(&info_labels)
+        .set(statuses_count);
+
+    // Collect account last status at
+    let last_status_at =
+        NaiveDate::parse_from_str(body["last_status_at"].as_str().unwrap(), "%Y-%m-%d")
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .timestamp();
+
+    println!(
+        "@{}@{}: Last status at: {}",
+        username, instance, last_status_at
+    );
+    MASTODON_ACCOUNT_LAST_STATUS_AT
+        .with_label_values(&info_labels)
+        .set(last_status_at);
+
+    Ok(())
+}
+
+async fn collect_accounts() -> Result<(), tokio::task::JoinError> {
+    // TODO @Shinigami92 2022-11-21: Get rid of unsafe
+    unsafe {
+        let tasks = ACCOUNTS
+            .iter()
+            .map(|(instance, account_id)| {
+                tokio::spawn(async { collect_account(instance, account_id).await })
+            })
+            .collect::<Vec<_>>();
+
+        for task in tasks {
+            task.await?.ok();
         }
     }
 
@@ -160,7 +311,8 @@ async fn collect_instances() -> Result<(), tokio::task::JoinError> {
 }
 
 async fn metrics() -> Result<impl warp::Reply, warp::Rejection> {
-    collect_instances().await.unwrap();
+    collect_instances().await.ok();
+    collect_accounts().await.ok();
 
     let mut buffer = vec![];
     let encoder = TextEncoder::new();
@@ -174,20 +326,10 @@ struct ServerConfig {
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
-struct StaticConfig {
-    targets: Vec<String>,
-}
-
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
-struct ScrapeConfig {
-    job_name: String,
-    static_configs: Vec<StaticConfig>,
-}
-
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
 struct Config {
     server: ServerConfig,
-    scrape_configs: Vec<ScrapeConfig>,
+    instance_info: Vec<String>,
+    accounts: Vec<(String, String)>,
 }
 
 #[tokio::main]
@@ -205,6 +347,18 @@ async fn main() {
     REGISTRY
         .register(Box::new(MASTODON_REGISTRATIONS_APPROVAL_REQUIRED.clone()))
         .unwrap();
+    REGISTRY
+        .register(Box::new(MASTODON_ACCOUNT_FOLLOWERS_COUNT.clone()))
+        .unwrap();
+    REGISTRY
+        .register(Box::new(MASTODON_ACCOUNT_FOLLOWING_COUNT.clone()))
+        .unwrap();
+    REGISTRY
+        .register(Box::new(MASTODON_ACCOUNT_STATUSES_COUNT.clone()))
+        .unwrap();
+    REGISTRY
+        .register(Box::new(MASTODON_ACCOUNT_LAST_STATUS_AT.clone()))
+        .unwrap();
 
     let config_file_name = "mastodon_exporter.yml";
 
@@ -214,12 +368,8 @@ async fn main() {
             server: ServerConfig {
                 http_listen_port: 9498,
             },
-            scrape_configs: vec![ScrapeConfig {
-                job_name: "instances".to_string(),
-                static_configs: vec![StaticConfig {
-                    targets: vec!["mas.to".to_string(), "mastodon.social".to_string()],
-                }],
-            }],
+            instance_info: vec!["mas.to".to_string(), "mastodon.social".to_string()],
+            accounts: vec![],
         };
         let default_config_yaml = serde_yaml::to_string(&default_config).unwrap();
         fs::write(config_file_name, default_config_yaml).unwrap();
@@ -233,18 +383,21 @@ async fn main() {
     let port: u16 = config.server.http_listen_port;
 
     // Read instances from config
-    let instances: Vec<String> = config
-        .scrape_configs
-        .iter()
-        .flat_map(|scrape_config| scrape_config.static_configs.iter())
-        .flat_map(|static_config| static_config.targets.iter())
-        .map(|target| target.to_string())
-        .collect();
+    let instances: Vec<String> = config.instance_info;
 
     // TODO @Shinigami92 2022-11-20: Get rid of unsafe
     unsafe {
         INSTANCES.init();
         INSTANCES.extend(instances);
+    }
+
+    // Read accounts from config
+    let accounts: Vec<(String, String)> = config.accounts;
+
+    // TODO @Shinigami92 2022-11-21: Get rid of unsafe
+    unsafe {
+        ACCOUNTS.init();
+        ACCOUNTS.extend(accounts);
     }
 
     let routes = warp::get().and(warp::path("metrics").and_then(metrics));
