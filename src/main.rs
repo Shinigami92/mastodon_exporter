@@ -114,8 +114,12 @@ async fn metrics() -> Result<impl warp::Reply, warp::Rejection> {
 
     println!("Collecting metrics...");
 
-    collectors::instance::collect_instances().await.ok();
-    collectors::account::collect_accounts().await.ok();
+    collectors::instance::collect_instances(unsafe { INSTANCES.to_vec() })
+        .await
+        .ok();
+    collectors::account::collect_accounts(unsafe { ACCOUNTS.to_vec() })
+        .await
+        .ok();
 
     println!("Collecting all metrics done in {:?}", start.elapsed());
     println!();

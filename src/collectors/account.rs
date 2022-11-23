@@ -1,7 +1,7 @@
 use chrono::NaiveDate;
 
 use crate::{
-    mastodon, ACCOUNTS, MASTODON_ACCOUNT_FOLLOWERS_COUNT, MASTODON_ACCOUNT_FOLLOWING_COUNT,
+    mastodon, MASTODON_ACCOUNT_FOLLOWERS_COUNT, MASTODON_ACCOUNT_FOLLOWING_COUNT,
     MASTODON_ACCOUNT_LAST_STATUS_AT, MASTODON_ACCOUNT_STATUSES_COUNT, MASTODON_RATELIMIT_REMAINING,
     MASTODON_RATELIMIT_RESET,
 };
@@ -112,19 +112,21 @@ pub async fn collect_account(instance: &str, account_id: &str) -> Result<(), req
     Ok(())
 }
 
-pub async fn collect_accounts() -> Result<(), tokio::task::JoinError> {
-    // TODO @Shinigami92 2022-11-21: Get rid of unsafe
-    unsafe {
-        let tasks = ACCOUNTS
-            .iter()
-            .map(|(instance, account_id)| {
-                tokio::spawn(async { collect_account(instance, account_id).await })
-            })
-            .collect::<Vec<_>>();
+pub async fn collect_accounts(
+    accounts: Vec<(String, String)>,
+) -> Result<(), tokio::task::JoinError> {
+    let mut handles = Vec::new();
 
-        for task in tasks {
-            task.await?.ok();
-        }
+    for (instance, account_id) in accounts {
+        let handle =
+            tokio::spawn(
+                async move { collect_account(instance.as_str(), account_id.as_str()).await },
+            );
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.await.ok();
     }
 
     Ok(())

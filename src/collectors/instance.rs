@@ -1,5 +1,5 @@
 use crate::{
-    mastodon, INSTANCES, MASTODON_INFO, MASTODON_RATELIMIT_REMAINING, MASTODON_RATELIMIT_RESET,
+    mastodon, MASTODON_INFO, MASTODON_RATELIMIT_REMAINING, MASTODON_RATELIMIT_RESET,
     MASTODON_REGISTRATIONS_APPROVAL_REQUIRED, MASTODON_REGISTRATIONS_ENABLED,
 };
 
@@ -75,17 +75,16 @@ pub async fn collect_instance(instance: &str) -> Result<(), reqwest::Error> {
     Ok(())
 }
 
-pub async fn collect_instances() -> Result<(), tokio::task::JoinError> {
-    // TODO @Shinigami92 2022-11-20: Get rid of unsafe
-    unsafe {
-        let tasks = INSTANCES
-            .iter()
-            .map(|instance| tokio::spawn(async { collect_instance(instance).await }))
-            .collect::<Vec<_>>();
+pub async fn collect_instances(instances: Vec<String>) -> Result<(), tokio::task::JoinError> {
+    let mut handles = Vec::new();
 
-        for task in tasks {
-            task.await?.ok();
-        }
+    for instance in instances {
+        let handle = tokio::spawn(async move { collect_instance(instance.as_str()).await });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.await.ok();
     }
 
     Ok(())
