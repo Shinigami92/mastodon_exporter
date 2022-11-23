@@ -2,6 +2,11 @@
 name = "mastodon_exporter"
 version = "0.1.0"
 edition = "2021"
+description = "A Mastodon exporter for Prometheus"
+license-file = "LICENSE"
+repository = "https://github.com/Shinigami92/mastodon_exporter"
+keywords = ["exporter", "mastodon", "prometheus"]
+categories = ["command-line-utilities"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
