@@ -144,8 +144,13 @@ async fn collect_instance(instance: &str) -> Result<(), reqwest::Error> {
         .with_label_values(&[instance])
         .set(ratelimit_reset);
 
+    if let Err(err) = &response.error_for_status_ref() {
+        println!("Error: {} {}", instance, err);
+        return Ok(());
+    }
+
     // Collect response body data
-    let body = response.json::<mastodon::InstanceResponse>().await?;
+    let body = response.json::<mastodon::InstanceResponse>().await.unwrap();
 
     // Collect instance info
     let info_labels = [instance, &body.domain, &body.title, &body.version];
@@ -227,8 +232,18 @@ async fn collect_account(instance: &str, account_id: &str) -> Result<(), reqwest
         .with_label_values(&[instance])
         .set(ratelimit_reset);
 
+    if let Err(err) = &response.error_for_status_ref() {
+        if err.status() == Some(reqwest::StatusCode::NOT_FOUND) {
+            println!("{}: Account {} not found", instance, account_id);
+            return Ok(());
+        }
+
+        println!("Error: {} {} {}", instance, account_id, err);
+        return Ok(());
+    }
+
     // Collect response body data
-    let body = response.json::<mastodon::AccountResponse>().await?;
+    let body = response.json::<mastodon::AccountResponse>().await.unwrap();
 
     // TODO @Shinigami92 2022-11-21: Handle case when account is not found
     let username = &body.username;
