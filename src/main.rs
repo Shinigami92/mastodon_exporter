@@ -9,9 +9,9 @@ use std::{fs, path::Path};
 
 use chrono::NaiveDate;
 use prometheus::{Encoder, IntGaugeVec, Opts, Registry, TextEncoder};
-use serde_derive::{Deserialize, Serialize};
 use warp::Filter;
 
+mod config;
 mod mastodon;
 
 lazy_static! {
@@ -315,18 +315,6 @@ async fn metrics() -> Result<impl warp::Reply, warp::Rejection> {
     Ok(String::from_utf8(buffer).unwrap())
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
-struct ServerConfig {
-    http_listen_port: u16,
-}
-
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
-struct Config {
-    server: ServerConfig,
-    instance_info: Vec<String>,
-    accounts: Vec<(String, String)>,
-}
-
 #[tokio::main]
 async fn main() {
     REGISTRY
@@ -359,20 +347,13 @@ async fn main() {
 
     // Create default config if it doesn't exist
     if !Path::new(config_file_name).exists() {
-        let default_config = Config {
-            server: ServerConfig {
-                http_listen_port: 9498,
-            },
-            instance_info: vec!["mas.to".to_string(), "mastodon.social".to_string()],
-            accounts: vec![],
-        };
-        let default_config_yaml = serde_yaml::to_string(&default_config).unwrap();
+        let default_config_yaml = serde_yaml::to_string(&config::Config::default()).unwrap();
         fs::write(config_file_name, default_config_yaml).unwrap();
     }
 
     // Read yaml config file
     let config_file = std::fs::File::open(config_file_name).unwrap();
-    let config: Config = serde_yaml::from_reader(config_file).unwrap();
+    let config: config::Config = serde_yaml::from_reader(config_file).unwrap();
 
     // Read port from config
     let port: u16 = config.server.http_listen_port;
