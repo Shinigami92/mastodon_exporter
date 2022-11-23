@@ -10,7 +10,6 @@ use std::{fs, path::Path};
 use chrono::NaiveDate;
 use prometheus::{Encoder, IntGaugeVec, Opts, Registry, TextEncoder};
 use serde_derive::{Deserialize, Serialize};
-use serde_json::Value;
 use warp::Filter;
 
 lazy_static! {
@@ -129,7 +128,7 @@ async fn collect_instance(instance: &str) -> Result<(), reqwest::Error> {
         .set(ratelimit_remaining);
 
     // Collect x-ratelimit-reset from header
-    let ratelimit_reset = response
+    let ratelimit_reset: i64 = response
         .headers()
         .get("x-ratelimit-reset")
         .unwrap()
@@ -144,7 +143,7 @@ async fn collect_instance(instance: &str) -> Result<(), reqwest::Error> {
         .set(ratelimit_reset);
 
     // Collect response body data
-    let body = response.json::<Value>().await?;
+    let body = response.json::<serde_json::Value>().await?;
 
     // Collect instance info
     let info_labels = [
@@ -157,7 +156,7 @@ async fn collect_instance(instance: &str) -> Result<(), reqwest::Error> {
     MASTODON_INFO.with_label_values(&info_labels).set(1);
 
     // Collect registrations_enabled value
-    let registrations_enabled: i64 = body["registrations"]["enabled"].as_bool().unwrap() as i64;
+    let registrations_enabled = i64::from(body["registrations"]["enabled"].as_bool().unwrap());
     println!(
         "{}: Registrations enabled: {:?}",
         instance, registrations_enabled
@@ -167,9 +166,11 @@ async fn collect_instance(instance: &str) -> Result<(), reqwest::Error> {
         .set(registrations_enabled);
 
     // Collect registrations_approval_required value
-    let registrations_approval_required = body["registrations"]["approval_required"]
-        .as_bool()
-        .unwrap() as i64;
+    let registrations_approval_required = i64::from(
+        body["registrations"]["approval_required"]
+            .as_bool()
+            .unwrap(),
+    );
     println!(
         "{}: Registrations approval required: {:?}",
         instance, registrations_approval_required
@@ -219,7 +220,7 @@ async fn collect_account(instance: &str, account_id: &str) -> Result<(), reqwest
         .set(ratelimit_remaining);
 
     // Collect x-ratelimit-reset from header
-    let ratelimit_reset = response
+    let ratelimit_reset: i64 = response
         .headers()
         .get("x-ratelimit-reset")
         .unwrap()
@@ -234,7 +235,7 @@ async fn collect_account(instance: &str, account_id: &str) -> Result<(), reqwest
         .set(ratelimit_reset);
 
     // Collect response body data
-    let body = response.json::<Value>().await?;
+    let body = response.json::<serde_json::Value>().await?;
 
     // TODO @Shinigami92 2022-11-21: Handle case when account is not found
     let username = body["username"].as_str().unwrap();
@@ -244,7 +245,7 @@ async fn collect_account(instance: &str, account_id: &str) -> Result<(), reqwest
     println!("Account info: {:?}", info_labels);
 
     // Collect account followers count
-    let followers_count: i64 = body["followers_count"].as_i64().unwrap();
+    let followers_count = body["followers_count"].as_i64().unwrap();
     println!(
         "@{}@{}: Followers count: {}",
         username, instance, followers_count
@@ -254,7 +255,7 @@ async fn collect_account(instance: &str, account_id: &str) -> Result<(), reqwest
         .set(followers_count);
 
     // Collect account following count
-    let following_count: i64 = body["following_count"].as_i64().unwrap();
+    let following_count = body["following_count"].as_i64().unwrap();
     println!(
         "@{}@{}: Following count: {}",
         username, instance, following_count
@@ -264,7 +265,7 @@ async fn collect_account(instance: &str, account_id: &str) -> Result<(), reqwest
         .set(following_count);
 
     // Collect account statuses count
-    let statuses_count: i64 = body["statuses_count"].as_i64().unwrap();
+    let statuses_count = body["statuses_count"].as_i64().unwrap();
     println!(
         "@{}@{}: Statuses count: {}",
         username, instance, statuses_count
@@ -274,7 +275,7 @@ async fn collect_account(instance: &str, account_id: &str) -> Result<(), reqwest
         .set(statuses_count);
 
     // Collect account last status at
-    let last_status_at =
+    let last_status_at: i64 =
         NaiveDate::parse_from_str(body["last_status_at"].as_str().unwrap(), "%Y-%m-%d")
             .unwrap()
             .and_hms_opt(0, 0, 0)
