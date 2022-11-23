@@ -5,6 +5,7 @@ extern crate lazy_static;
 extern crate serde_derive;
 extern crate serde_yaml;
 
+use std::time::Instant;
 use std::{fs, path::Path};
 
 use chrono::NaiveDate;
@@ -321,8 +322,15 @@ async fn collect_accounts() -> Result<(), tokio::task::JoinError> {
 }
 
 async fn metrics() -> Result<impl warp::Reply, warp::Rejection> {
+    let start = Instant::now();
+
+    println!("Collecting metrics...");
+
     collect_instances().await.ok();
     collect_accounts().await.ok();
+
+    println!("Collecting all metrics done in {:?}", start.elapsed());
+    println!("");
 
     let mut buffer = vec![];
     let encoder = TextEncoder::new();
