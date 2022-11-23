@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// The configuration for the server.
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct ServerConfig {
     /// The port to listen on.
     pub http_listen_port: u16,
@@ -16,7 +16,7 @@ impl Default for ServerConfig {
 }
 
 /// Represents the configuration for the application.
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct Config {
     /// The configuration for the server.
     pub server: ServerConfig,
